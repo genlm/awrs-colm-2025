@@ -8,6 +8,32 @@ The most performant reference implementation of the AWRS-SMC algorithm can be fo
 
 Tidied scripts to replicate the paper experiments based on the [genlm/genlm-control](https://github.com/genlm/genlm-control) and [genlm/genlm-eval](https://github.com/genlm/genlm-eval) libraries will be available shortly.
 
+## Setup
+
+
+1. Clone this repository:
+
+    ```bash
+    git clone https://github.com/genlm/awrs-colm-2025.git
+    cd awrs-colm-2025
+    ```
+
+2. Create and activate a uv environment:
+
+    ```bash
+    uv venv --python=3.11
+    source .venv/bin/activate
+    ```
+
+    *To install uv, run `curl -LsSf https://github.com/astral-sh/uv/releases/latest/download/uv-installer.sh`.*
+
+
+3. Install the project dependencies:
+
+    ```bash
+    uv pip install -e .
+    ```
+
 ## Citation
 
 ```bibtex
