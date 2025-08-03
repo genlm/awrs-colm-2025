@@ -1,149 +1,179 @@
-from dataclasses import dataclass
-from typing import Protocol
+from pathlib import Path
+from typing import Optional
+from abc import ABC, abstractmethod
 from transformers import AutoTokenizer
-
-from genlm.control import Potential
+from functools import lru_cache
+from genlm.control import Potential, BoolCFG
 from genlm.backend.llm import AsyncVirtualLM
 from genlm.eval import Dataset, Evaluator, Instance
 
+from genlm.eval.domains import (
+    molecular_synthesis,
+    pattern_matching,
+    spider,
+)
 
-class PotentialFactory(Protocol):
-    """A factory for creating potentials given a dataset instance."""
-
-    def __call__(self, instance: Instance) -> Potential: ...
-
-
-class EOSFactory(Protocol):
-    """A factory for creating eos tokens given the language model."""
-
-    def __call__(self, llm: AsyncVirtualLM) -> list[bytes]: ...
+DATA_DIR = Path(__file__).parent.parent / "data"
 
 
-class PromptFactory(Protocol):
-    """A factory for creating prompts given an instance."""
-
-    def __call__(
-        self,
-        tokenizer: AutoTokenizer,
-        instance: Instance,
-        use_chat_template: bool = True,
-    ) -> str: ...
-
-
-@dataclass
-class Task:
+class Task(ABC):
     """A task configuration."""
 
-    name: str
-    dataset: Dataset
-    evaluator: Evaluator
-    max_tokens: int
-    potential_factory: PotentialFactory
-    eos_token_factory: EOSFactory
-    prompt_factory: PromptFactory
+    def __init__(
+        self,
+        name: str,
+        dataset: Dataset,
+        evaluator: Evaluator,
+        max_tokens: int,
+    ):
+        self.name = name
+        self.dataset = dataset
+        self.evaluator = evaluator
+        self.max_tokens = max_tokens
 
-    @classmethod
-    def from_name(cls, name: str) -> "Task":
-        """Load the default task configuration for the given name."""
-        if name == "pattern-matching":
-            return cls.pattern_matching()
-        elif name == "text-to-sql":
-            return cls.text_to_sql()
-        elif name == "molecular-synthesis":
-            return cls.molecular_synthesis()
-        elif name == "json":
-            return cls.json()
-        elif name == "goal-inference":
-            return cls.goal_inference()
-        else:
-            raise ValueError(f"Unknown task: {name}")
+    @abstractmethod
+    def make_condition(self, instance: Instance) -> Potential:
+        pass
 
-    @classmethod
-    def pattern_matching(
-        cls,
-        pattern_csv_path: str = "data/pattern_matching/patterns.csv",
+    @abstractmethod
+    def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
+        pass
+
+    @abstractmethod
+    def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
+        pass
+
+
+class PatternMatching(Task):
+    """A task configuration for pattern matching."""
+
+    def __init__(
+        self,
+        pattern_csv_path: Optional[str] = None,
         max_tokens: int = 100,
-    ) -> "Task":
-        """Load the task configuration for pattern matching."""
-        from genlm.eval.domains.pattern_matching import (
-            PatternMatchingDataset,
-            PatternMatchingEvaluator,
-            PatternPotential,
-            default_prompt_formatter,
+    ):
+        pattern_csv_path = (
+            pattern_csv_path or DATA_DIR / "pattern_matching" / "patterns.csv"
         )
-
-        def eos_token_factory(llm) -> list[bytes]:
-            eos_tokens = []
-
-            # Special tokens
-            for token_id in llm.model.tokenizer.get_added_vocab().values():
-                eos_tokens.append(llm.token_maps.decode[token_id])
-
-            # Newlines
-            for token in llm.vocab:
-                if b"\n" in token:
-                    eos_tokens.append(token)
-
-            eos_tokens.append(llm.token_maps.decode[llm.model.tokenizer.eos_token_id])
-
-            return list(set(eos_tokens))
-
-        return cls(
-            name="pattern-matching",
-            dataset=PatternMatchingDataset.from_csv(
+        super().__init__(
+            "pattern-matching",
+            pattern_matching.PatternMatchingDataset.from_csv(
                 pattern_csv_path, pattern_column="regex"
             ),
-            evaluator=PatternMatchingEvaluator(),
-            potential_factory=lambda instance: PatternPotential(instance.pattern),
-            eos_token_factory=eos_token_factory,
-            prompt_factory=default_prompt_formatter,
+            pattern_matching.PatternMatchingEvaluator(),
+            max_tokens,
+        )
+
+    def make_condition(self, instance: Instance) -> Potential:
+        return pattern_matching.PatternPotential(instance.pattern)
+
+    def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
+        eos_tokens = []
+
+        # Special tokens
+        for token_id in llm.tokenizer.get_added_vocab().values():
+            eos_tokens.append(llm.byte_vocab[token_id])
+
+        # Newlines
+        for token in llm.byte_vocab:
+            if b"\n" in token:
+                eos_tokens.append(token)
+
+        eos_tokens.append(llm.byte_vocab[llm.tokenizer.eos_token_id])
+
+        return list(set(eos_tokens))
+
+    def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
+        return pattern_matching.default_prompt_formatter(tokenizer, instance)
+
+
+class TextToSQL(Task):
+    """A task configuration for text-to-SQL."""
+
+    def __init__(
+        self,
+        spider_data_dir: Optional[str] = None,
+        spider_grammars: Optional[str] = None,
+        few_shot_example_ids: Optional[list[int]] = None,
+        max_tokens: int = 100,
+    ):
+        spider_data_dir = spider_data_dir or DATA_DIR / "spider"
+        spider_grammars = spider_grammars or DATA_DIR / "spider" / "grammars.json"
+
+        super().__init__(
+            name="text-to-sql",
+            dataset=spider.SpiderDataset.from_spider_dir(
+                spider_data_dir,
+                grammar_json_path=spider_grammars,
+                few_shot_example_ids=few_shot_example_ids,
+            ),
+            evaluator=spider.SpiderEvaluator(spider_data_dir),
             max_tokens=max_tokens,
         )
 
-    @classmethod
-    def text_to_sql(cls, spider_data_dir: str, spider_grammars: str) -> "Task":
-        """Load the task configuration for text-to-SQL."""
-        from genlm.control import BoolCFG
-        from genlm.eval.domains.spider import (
-            SpiderDataset,
-            SpiderEvaluator,
-            default_prompt_formatter,
+    @lru_cache(maxsize=2)
+    def _get_cfg(self, lark_grammar: str) -> BoolCFG:
+        return BoolCFG.from_lark(lark_grammar)
+
+    def make_condition(self, instance: Instance) -> Potential:
+        return self._get_cfg(instance.lark_grammar)
+
+    def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
+        return [llm.byte_vocab[llm.tokenizer.eos_token_id]]
+
+    def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
+        from genlm.eval.domains.spider import default_prompt_formatter
+
+        return default_prompt_formatter(tokenizer, instance)
+
+
+class MolecularSynthesis(Task):
+    """A task configuration for molecular synthesis."""
+
+    def __init__(
+        self,
+        smiles_path: Optional[str] = None,
+        max_tokens: int = 100,
+    ):
+        smiles_path = (
+            smiles_path or DATA_DIR / "molecular_synthesis" / "GDB17.50000000.smi"
         )
 
-        return cls(
-            name="text-to-sql",
-            dataset=SpiderDataset.from_spider_dir(
-                spider_data_dir, grammar_json_path=spider_grammars
-            ),
-            evaluator=SpiderEvaluator(spider_data_dir),
-            potential_factory=lambda instance: BoolCFG.from_lark(instance.lark_grammar),
-            eos_token_factory=lambda vocab: [b"\n", b"\n\n"],
-            prompt_factory=default_prompt_formatter,
-        )
-
-    @classmethod
-    def molecular_synthesis(cls, molecular_synthesis_csv_path: str) -> "Task":
-        """Load the task configuration for molecular synthesis."""
-        from genlm.eval.domains.molecular_synthesis import (
-            MolecularSynthesisDataset,
-            MolecularSynthesisEvaluator,
-            default_prompt_formatter,
-            PartialSMILES,
-        )
-
-        return cls(
+        super().__init__(
             name="molecular-synthesis",
-            dataset=MolecularSynthesisDataset.from_csv(molecular_synthesis_csv_path),
-            evaluator=MolecularSynthesisEvaluator(),
-            potential_factory=lambda instance: PartialSMILES(),
-            eos_token_factory=lambda vocab: [b"\n", b"\n\n"],
-            prompt_factory=default_prompt_formatter,
+            dataset=molecular_synthesis.MolecularSynthesisDataset.from_smiles(
+                smiles_path
+            ),
+            evaluator=molecular_synthesis.MolecularSynthesisEvaluator(),
+            max_tokens=max_tokens,
         )
 
-    @classmethod
-    def json(cls):
-        raise NotImplementedError("JSON is not implemented yet")
+    def make_condition(self, instance: Instance) -> Potential:
+        return molecular_synthesis.PartialSMILES()
 
-    @classmethod
-    def goal_inference(cls):
-        raise NotImplementedError("Goal inference is not implemented yet")
+    def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
+        return [t for t in llm.byte_vocab if b"\n" in t]
+
+    def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
+        return molecular_synthesis.default_prompt_formatter(tokenizer, instance)
+
+
+# class JSON(Task):
+#     """A task configuration for JSON."""
+
+#     def __init__(self, json_data_path: str, max_tokens: int = 450):
+#         super().__init__(
+#             name="json",
+#             dataset=json.JSONDataset.from_csv(json_data_path),
+#             evaluator=json.JSONEvaluator(),
+#             max_tokens=max_tokens,
+#         )
+
+#     def make_potential(self, instance: Instance) -> Potential:
+#         return JsonSchema(instance.schema)
+
+#     def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
+#         return [llm.tokenizer.eos_token_id]
+
+#     def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
+#         return json.default_prompt_formatter(tokenizer, instance)

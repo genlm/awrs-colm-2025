@@ -1,154 +1,171 @@
 """Sampling methods."""
 
+from functools import cached_property
+from abc import ABC, abstractmethod
+import time
+
 from genlm.backend.llm import AsyncVirtualLM
 from genlm.eval import Instance, ModelOutput, ModelResponse
-from genlm.control import direct_token_sampler, PromptedLLM
+from genlm.control import direct_token_sampler, PromptedLLM, Potential
 from genlm.control.sampler.sequence import Sequences
 
 from .sampler import AWRS
-from .tasks import PromptFactory, EOSFactory, PotentialFactory
+from .tasks import Task
 
 
-class Method:
-    def __init__(
-        self,
-        llm: AsyncVirtualLM,
-        prompt_factory: PromptFactory,
-        eos_token_factory: EOSFactory,
-        max_tokens: int,
-    ):
+class Method(ABC):
+    """A method for constrained sampling from a language model."""
+
+    def __init__(self, llm: AsyncVirtualLM, task: Task):
         self.llm = llm
-        self.tokenizer = self.llm.tokenizer
-        self.prompt_factory = prompt_factory
-        self.max_tokens = max_tokens
-        self.eos_tokens = eos_token_factory(self.llm.byte_vocab)
+        self.task = task
+
+    @property
+    def tokenizer(self):
+        return self.llm.tokenizer
+
+    @cached_property
+    def eos_tokens(self) -> list[bytes]:
+        return self.task.get_eos_tokens(self.llm)
+
+    @property
+    def max_tokens(self) -> int:
+        return self.task.max_tokens
 
     @staticmethod
-    def postprocess(sequences: Sequences) -> ModelOutput:
+    def postprocess(sequences: Sequences, runtime: float) -> ModelOutput:
         return ModelOutput(
             responses=[
                 ModelResponse(response=sequence, weight=prob)
                 for sequence, prob in sequences.decoded_posterior.items()
             ],
+            runtime_seconds=runtime,
         )
 
     def make_llm_potential(self, instance: Instance) -> PromptedLLM:
         return PromptedLLM(
             self.llm,
-            prompt_ids=self.prompt_factory(self.tokenizer, instance),
+            prompt_ids=self.task.get_prompt(self.tokenizer, instance),
             eos_tokens=self.eos_tokens,
         )
 
+    def make_potentials(self, instance: Instance) -> tuple[Potential, Potential]:
+        llm_potential = self.make_llm_potential(instance)
+        condition = self.task.make_condition(instance).coerce(llm_potential, f=b"".join)
+        return llm_potential, condition
+
+    @abstractmethod
     async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
         pass
 
 
 class BaseLM(Method):
+    """Sample directly from the language model."""
+
     async def __call__(self, instance: Instance) -> ModelOutput:
-        return self.postprocess(
-            await direct_token_sampler(self.llm).smc(
-                n_particles=1,
-                ess_threshold=0,
-                max_tokens=self.max_tokens,
-            )
+        llm = self.make_llm_potential(instance)
+        start = time.time()
+        outputs = await direct_token_sampler(llm).smc(
+            n_particles=1,
+            ess_threshold=0,
+            max_tokens=self.max_tokens,
         )
+        runtime = time.time() - start
+
+        return self.postprocess(outputs, runtime)
 
 
 class LCD(Method):
-    def __init__(
-        self,
-        llm: AsyncVirtualLM,
-        prompt_factory: PromptFactory,
-        eos_token_factory: EOSFactory,
-        condition_factory: PotentialFactory,
-        max_tokens: int = 1000,
-    ):
-        super().__init__(llm, prompt_factory, eos_token_factory, max_tokens)
-        self.condition_factory = condition_factory
+    """Sample using locally constrained decoding."""
 
     async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
-        llm_potential = self.make_llm_potential(instance)
-        condition = self.condition_factory(instance).coerce(llm_potential, f="".join)
-        return self.postprocess(
-            await AWRS(llm_potential, condition, proper_weights=False).smc(
-                n_particles=1,
-                ess_threshold=0,
-                max_tokens=self.max_tokens,
-            )
+        llm_potential, condition = self.make_potentials(instance)
+
+        start = time.time()
+        outputs = await AWRS(llm_potential, condition, proper_weights=False).smc(
+            n_particles=1,
+            ess_threshold=0,
+            max_tokens=self.max_tokens,
         )
+        runtime = time.time() - start
+
+        return self.postprocess(outputs, runtime)
 
 
 class SampleRerank(Method):
-    def __init__(
-        self,
-        llm: AsyncVirtualLM,
-        n_particles: int,
-        prompt_factory: PromptFactory,
-        eos_token_factory: EOSFactory,
-        condition_factory: PotentialFactory,
-        max_tokens: int = 1000,
-    ):
-        super().__init__(llm, prompt_factory, eos_token_factory, max_tokens)
+    """Importance sampling with the base model as a proposal."""
+
+    def __init__(self, llm: AsyncVirtualLM, task: Task, n_particles: int):
+        super().__init__(llm, task)
         self.n_particles = n_particles
-        self.condition_factory = condition_factory
 
     async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
-        llm_potential = self.make_llm_potential(instance)
-        condition = self.condition_factory(instance).coerce(llm_potential, f="".join)
-        return self.postprocess(
-            await direct_token_sampler(llm_potential).smc(
-                n_particles=self.n_particles,
-                ess_threshold=0,
-                max_tokens=self.max_tokens,
-                critic=condition,
-            )
+        llm_potential, condition = self.make_potentials(instance)
+
+        start = time.time()
+        outputs = await direct_token_sampler(llm_potential).smc(
+            n_particles=self.n_particles,
+            ess_threshold=0,
+            max_tokens=self.max_tokens,
+            critic=condition,
         )
+        runtime = time.time() - start
+
+        return self.postprocess(outputs, runtime)
 
 
 class TwistedSMC(Method):
+    """SMC with the base model as a proposal and the condition as twists."""
+
     def __init__(
         self,
         llm: AsyncVirtualLM,
+        task: Task,
         n_particles: int,
         ess_threshold: float,
-        max_tokens: int = 1000,
     ):
-        super().__init__(llm, max_tokens)
+        super().__init__(llm, task)
         self.n_particles = n_particles
         self.ess_threshold = ess_threshold
 
     async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
-        llm_potential = self.make_llm_potential(instance)
-        condition = self.condition_factory(instance).coerce(llm_potential, f="".join)
-        return self.postprocess(
-            await direct_token_sampler(self.llm).smc(
-                n_particles=self.n_particles,
-                ess_threshold=self.ess_threshold,
-                max_tokens=self.max_tokens,
-                critic=condition,
-            )
+        llm_potential, condition = self.make_potentials(instance)
+
+        start = time.time()
+        outputs = await direct_token_sampler(llm_potential).smc(
+            n_particles=self.n_particles,
+            ess_threshold=self.ess_threshold,
+            max_tokens=self.max_tokens,
+            critic=condition,
         )
+        runtime = time.time() - start
+
+        return self.postprocess(outputs, runtime)
 
 
 class AWRSSMC(Method):
+    """SMC with AWRS as a proposal."""
+
     def __init__(
         self,
         llm: AsyncVirtualLM,
+        task: Task,
         n_particles: int,
         ess_threshold: float,
-        max_tokens: int = 1000,
     ):
-        super().__init__(llm, max_tokens)
+        super().__init__(llm, task)
         self.n_particles = n_particles
         self.ess_threshold = ess_threshold
 
     async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
-        llm_potential = self.make_llm_potential(instance)
-        condition = self.condition_factory(instance).coerce(llm_potential, f="".join)
-        return self.postprocess(
-            await AWRS(llm_potential, condition, proper_weights=True).smc(
-                n_particles=self.n_particles,
-                ess_threshold=self.ess_threshold,
-                max_tokens=self.max_tokens,
-            )
+        llm_potential, condition = self.make_potentials(instance)
+
+        start = time.time()
+        outputs = await AWRS(llm_potential, condition, proper_weights=True).smc(
+            n_particles=self.n_particles,
+            ess_threshold=self.ess_threshold,
+            max_tokens=self.max_tokens,
         )
+        runtime = time.time() - start
+
+        return self.postprocess(outputs, runtime)
