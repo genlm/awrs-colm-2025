@@ -3,19 +3,12 @@ import pytest
 from experiments.methods import BaseLM, LCD, SampleRerank, TwistedSMC, AWRSSMC
 from experiments.tasks import PatternMatching, MolecularSynthesis, TextToSQL, DATA_DIR
 
-from genlm.backend import load_model_by_name
-
-
-@pytest.fixture(scope="module")
-def llm():
-    return load_model_by_name("meta-llama/Llama-3.2-1B-Instruct", backend="hf")
-
 
 TASKS = {}
 for task in [
     PatternMatching(),
     MolecularSynthesis(
-        smiles_path=DATA_DIR / "molecular_synthesis" / "GDB17_sample.txt"
+        smiles_path=DATA_DIR / "molecular_synthesis" / "GDB17_sample.txt",
     ),
     TextToSQL(
         spider_data_dir=DATA_DIR / "spider" / "spider_sample",
