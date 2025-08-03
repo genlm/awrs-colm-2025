@@ -16,6 +16,17 @@ from genlm.eval.domains import (
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 
+TASK_REGISTRY = {}
+
+
+def register_task(name: str):
+    def decorator(cls):
+        TASK_REGISTRY[name] = cls
+        return cls
+
+    return decorator
+
+
 class Task(ABC):
     """A task configuration."""
 
@@ -31,6 +42,12 @@ class Task(ABC):
         self.evaluator = evaluator
         self.max_tokens = max_tokens
 
+    @classmethod
+    def from_name(cls, name: str, *args, **kwargs) -> "Task":
+        if name not in TASK_REGISTRY:
+            raise ValueError(f"Task {name} not found in TASK_REGISTRY")
+        return TASK_REGISTRY[name](*args, **kwargs)
+
     @abstractmethod
     def make_condition(self, instance: Instance) -> Potential:
         pass
@@ -40,10 +57,13 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
+    def get_prompt(
+        self, tokenizer: AutoTokenizer, instance: Instance, use_chat_format: bool = True
+    ) -> list[int]:
         pass
 
 
+@register_task("pattern-matching")
 class PatternMatching(Task):
     """A task configuration for pattern matching."""
 
@@ -56,12 +76,12 @@ class PatternMatching(Task):
             pattern_csv_path or DATA_DIR / "pattern_matching" / "patterns.csv"
         )
         super().__init__(
-            "pattern-matching",
-            pattern_matching.PatternMatchingDataset.from_csv(
+            name="pattern-matching",
+            dataset=pattern_matching.PatternMatchingDataset.from_csv(
                 pattern_csv_path, pattern_column="regex"
             ),
-            pattern_matching.PatternMatchingEvaluator(),
-            max_tokens,
+            evaluator=pattern_matching.PatternMatchingEvaluator(),
+            max_tokens=max_tokens,
         )
 
     def make_condition(self, instance: Instance) -> Potential:
@@ -83,10 +103,15 @@ class PatternMatching(Task):
 
         return list(set(eos_tokens))
 
-    def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
-        return pattern_matching.default_prompt_formatter(tokenizer, instance)
+    def get_prompt(
+        self, tokenizer: AutoTokenizer, instance: Instance, use_chat_format: bool = True
+    ) -> list[int]:
+        return pattern_matching.default_prompt_formatter(
+            tokenizer, instance, use_chat_format
+        )
 
 
+@register_task("text-to-sql")
 class TextToSQL(Task):
     """A task configuration for text-to-SQL."""
 
@@ -121,12 +146,15 @@ class TextToSQL(Task):
     def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
         return [llm.byte_vocab[llm.tokenizer.eos_token_id]]
 
-    def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
+    def get_prompt(
+        self, tokenizer: AutoTokenizer, instance: Instance, use_chat_format: bool = True
+    ) -> list[int]:
         from genlm.eval.domains.spider import default_prompt_formatter
 
-        return default_prompt_formatter(tokenizer, instance)
+        return default_prompt_formatter(tokenizer, instance, use_chat_format)
 
 
+@register_task("molecular-synthesis")
 class MolecularSynthesis(Task):
     """A task configuration for molecular synthesis."""
 
@@ -154,8 +182,12 @@ class MolecularSynthesis(Task):
     def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
         return [t for t in llm.byte_vocab if b"\n" in t]
 
-    def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
-        return molecular_synthesis.default_prompt_formatter(tokenizer, instance)
+    def get_prompt(
+        self, tokenizer: AutoTokenizer, instance: Instance, use_chat_format: bool = True
+    ) -> list[int]:
+        return molecular_synthesis.default_prompt_formatter(
+            tokenizer, instance, use_chat_format
+        )
 
 
 # class JSON(Task):

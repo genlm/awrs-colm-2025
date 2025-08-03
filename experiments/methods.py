@@ -16,9 +16,10 @@ from .tasks import Task
 class Method(ABC):
     """A method for constrained sampling from a language model."""
 
-    def __init__(self, llm: AsyncVirtualLM, task: Task):
+    def __init__(self, llm: AsyncVirtualLM, task: Task, use_chat_format: bool = True):
         self.llm = llm
         self.task = task
+        self.use_chat_format = use_chat_format
 
     @property
     def tokenizer(self):
@@ -45,7 +46,11 @@ class Method(ABC):
     def make_llm_potential(self, instance: Instance) -> PromptedLLM:
         return PromptedLLM(
             self.llm,
-            prompt_ids=self.task.get_prompt(self.tokenizer, instance),
+            prompt_ids=self.task.get_prompt(
+                tokenizer=self.tokenizer,
+                instance=instance,
+                use_chat_format=self.use_chat_format,
+            ),
             eos_tokens=self.eos_tokens,
         )
 
@@ -62,7 +67,7 @@ class Method(ABC):
 class BaseLM(Method):
     """Sample directly from the language model."""
 
-    async def __call__(self, instance: Instance) -> ModelOutput:
+    async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
         llm = self.make_llm_potential(instance)
         start = time.time()
         outputs = await direct_token_sampler(llm).smc(
@@ -95,8 +100,14 @@ class LCD(Method):
 class SampleRerank(Method):
     """Importance sampling with the base model as a proposal."""
 
-    def __init__(self, llm: AsyncVirtualLM, task: Task, n_particles: int):
-        super().__init__(llm, task)
+    def __init__(
+        self,
+        llm: AsyncVirtualLM,
+        task: Task,
+        n_particles: int,
+        use_chat_format: bool = True,
+    ):
+        super().__init__(llm, task, use_chat_format)
         self.n_particles = n_particles
 
     async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
@@ -123,8 +134,9 @@ class TwistedSMC(Method):
         task: Task,
         n_particles: int,
         ess_threshold: float,
+        use_chat_format: bool = True,
     ):
-        super().__init__(llm, task)
+        super().__init__(llm, task, use_chat_format)
         self.n_particles = n_particles
         self.ess_threshold = ess_threshold
 
@@ -152,8 +164,9 @@ class AWRSSMC(Method):
         task: Task,
         n_particles: int,
         ess_threshold: float,
+        use_chat_format: bool = True,
     ):
-        super().__init__(llm, task)
+        super().__init__(llm, task, use_chat_format)
         self.n_particles = n_particles
         self.ess_threshold = ess_threshold
 
