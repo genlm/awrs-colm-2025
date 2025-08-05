@@ -120,9 +120,7 @@ class TextToSQL(Task):
         few_shot_example_ids: Optional[list[int]] = None,
         max_tokens: int = 100,
     ):
-        spider_data_dir = spider_data_dir or (
-            DATA_DIR / "spider" / "spider_data" / "train_others"
-        )
+        spider_data_dir = spider_data_dir or (DATA_DIR / "spider" / "spider_data")
         spider_grammars = spider_grammars or (DATA_DIR / "spider" / "grammars.json")
 
         super().__init__(

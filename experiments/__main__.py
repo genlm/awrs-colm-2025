@@ -1,5 +1,8 @@
+import torch
 import click
 import asyncio
+import os
+
 from rich import console
 from genlm.eval import run_evaluation
 from genlm.backend import load_model_by_name
@@ -10,6 +13,18 @@ from .methods import BaseLM, LCD, SampleRerank, TwistedSMC, AWRSSMC
 console = console.Console()
 
 TASKS = list(TASK_REGISTRY.keys())
+
+
+def load_llm(model_name, max_model_len):
+    backend = "vllm" if torch.cuda.is_available() else "hf"
+    if backend == "vllm":
+        return load_model_by_name(
+            model_name,
+            backend,
+            llm_opts={"engine_opts": {"max_model_len": max_model_len}},
+        )
+    else:
+        return load_model_by_name(model_name, backend)
 
 
 def common_options(f):
@@ -57,6 +72,11 @@ def common_options(f):
         is_flag=True,
         help="Use chat template for the prompt.",
     )(f)
+    f = click.option(
+        "--max-model-len",
+        default=10000,
+        help="Maximum model length supplied at initialization.",
+    )(f)
 
     return f
 
@@ -71,12 +91,18 @@ def base_lm(
     overwrite_outputs,
     verbosity,
     max_n_instances,
+    max_model_len,
     use_chat_format,
 ):
     """Run the base language model on a task."""
     console.print(f"[blue]Running base LM on '{task}'[/blue]")
     task = Task.from_name(task)
-    model = BaseLM(load_model_by_name(model_name), task, use_chat_format)
+    model = BaseLM(load_llm(model_name, max_model_len), task, use_chat_format)
+
+    if result_dir is not None:
+        result_dir = os.path.join(result_dir, "base-lm")
+        os.makedirs(result_dir, exist_ok=True)
+
     asyncio.run(
         run_evaluation(
             dataset=task.dataset,
@@ -102,15 +128,21 @@ def lcd(
     overwrite_outputs,
     verbosity,
     max_n_instances,
+    max_model_len,
     use_chat_format,
 ):
     """Run locally constrained decoding on a task."""
     console.print(f"[blue]Running LCD on '{task}'[/blue]")
     task = Task.from_name(task)
+
+    if result_dir is not None:
+        result_dir = os.path.join(result_dir, "lcd")
+        os.makedirs(result_dir, exist_ok=True)
+
     asyncio.run(
         run_evaluation(
             dataset=task.dataset,
-            model=LCD(load_model_by_name(model_name), task, use_chat_format),
+            model=LCD(load_llm(model_name, max_model_len), task, use_chat_format),
             evaluator=task.evaluator,
             n_replicates=1,
             verbosity=verbosity,
@@ -137,6 +169,7 @@ def sample_rerank(
     max_n_instances,
     num_particles,
     use_chat_format,
+    max_model_len,
 ):
     """Run sample rerank on a task."""
     console.print(
@@ -144,8 +177,14 @@ def sample_rerank(
     )
     task = Task.from_name(task)
     model = SampleRerank(
-        load_model_by_name(model_name), task, num_particles, use_chat_format
+        load_llm(model_name, max_model_len), task, num_particles, use_chat_format
     )
+    if result_dir is not None:
+        result_dir = os.path.join(
+            result_dir, "sample_rerank", f"{num_particles}_particles"
+        )
+        os.makedirs(result_dir, exist_ok=True)
+
     asyncio.run(
         run_evaluation(
             dataset=task.dataset,
@@ -178,6 +217,7 @@ def twisted_smc(
     num_particles,
     ess_threshold,
     use_chat_format,
+    max_model_len,
 ):
     """Run twisted SMC on a task."""
     console.print(
@@ -185,12 +225,19 @@ def twisted_smc(
     )
     task = Task.from_name(task)
     model = TwistedSMC(
-        load_model_by_name(model_name),
+        load_llm(model_name, max_model_len),
         task,
         num_particles,
         ess_threshold,
         use_chat_format,
     )
+
+    if result_dir is not None:
+        result_dir = os.path.join(
+            result_dir, "twisted_smc", f"{num_particles}_particles"
+        )
+        os.makedirs(result_dir, exist_ok=True)
+
     asyncio.run(
         run_evaluation(
             dataset=task.dataset,
@@ -223,6 +270,7 @@ def awrs_smc(
     use_chat_format,
     num_particles,
     ess_threshold,
+    max_model_len,
 ):
     """Run AWRS SMC on a task."""
     console.print(
@@ -230,12 +278,17 @@ def awrs_smc(
     )
     task = Task.from_name(task)
     model = AWRSSMC(
-        load_model_by_name(model_name),
+        load_llm(model_name, max_model_len),
         task,
         num_particles,
         ess_threshold,
         use_chat_format,
     )
+
+    if result_dir is not None:
+        result_dir = os.path.join(result_dir, "awrs_smc", f"{num_particles}_particles")
+        os.makedirs(result_dir, exist_ok=True)
+
     asyncio.run(
         run_evaluation(
             dataset=task.dataset,
