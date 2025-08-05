@@ -3,7 +3,7 @@ from typing import Optional
 from abc import ABC, abstractmethod
 from transformers import AutoTokenizer
 from functools import lru_cache
-from genlm.control import Potential, BoolCFG
+from genlm.control import Potential, BoolCFG, JsonSchema
 from genlm.backend.llm import AsyncVirtualLM
 from genlm.eval import Dataset, Evaluator, Instance
 
@@ -11,6 +11,7 @@ from genlm.eval.domains import (
     molecular_synthesis,
     pattern_matching,
     spider,
+    json_schema,
 )
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -32,12 +33,10 @@ class Task(ABC):
 
     def __init__(
         self,
-        name: str,
         dataset: Dataset,
         evaluator: Evaluator,
         max_tokens: int,
     ):
-        self.name = name
         self.dataset = dataset
         self.evaluator = evaluator
         self.max_tokens = max_tokens
@@ -76,7 +75,6 @@ class PatternMatching(Task):
             pattern_csv_path or DATA_DIR / "pattern_matching" / "patterns.csv"
         )
         super().__init__(
-            name="pattern-matching",
             dataset=pattern_matching.PatternMatchingDataset.from_csv(
                 pattern_csv_path, pattern_column="regex"
             ),
@@ -122,11 +120,12 @@ class TextToSQL(Task):
         few_shot_example_ids: Optional[list[int]] = None,
         max_tokens: int = 100,
     ):
-        spider_data_dir = spider_data_dir or DATA_DIR / "spider"
-        spider_grammars = spider_grammars or DATA_DIR / "spider" / "grammars.json"
+        spider_data_dir = spider_data_dir or (
+            DATA_DIR / "spider" / "spider_data" / "train_others"
+        )
+        spider_grammars = spider_grammars or (DATA_DIR / "spider" / "grammars.json")
 
         super().__init__(
-            name="text-to-sql",
             dataset=spider.SpiderDataset.from_spider_dir(
                 spider_data_dir,
                 grammar_json_path=spider_grammars,
@@ -149,9 +148,7 @@ class TextToSQL(Task):
     def get_prompt(
         self, tokenizer: AutoTokenizer, instance: Instance, use_chat_format: bool = True
     ) -> list[int]:
-        from genlm.eval.domains.spider import default_prompt_formatter
-
-        return default_prompt_formatter(tokenizer, instance, use_chat_format)
+        return spider.default_prompt_formatter(tokenizer, instance, use_chat_format)
 
 
 @register_task("molecular-synthesis")
@@ -168,7 +165,6 @@ class MolecularSynthesis(Task):
         )
 
         super().__init__(
-            name="molecular-synthesis",
             dataset=molecular_synthesis.MolecularSynthesisDataset.from_smiles(
                 smiles_path
             ),
@@ -183,29 +179,42 @@ class MolecularSynthesis(Task):
         return [t for t in llm.byte_vocab if b"\n" in t]
 
     def get_prompt(
-        self, tokenizer: AutoTokenizer, instance: Instance, use_chat_format: bool = True
+        self,
+        tokenizer: AutoTokenizer,
+        instance: Instance,
+        use_chat_format: bool = False,
     ) -> list[int]:
         return molecular_synthesis.default_prompt_formatter(
             tokenizer, instance, use_chat_format
         )
 
 
-# class JSON(Task):
-#     """A task configuration for JSON."""
+@register_task("json")
+class JSON(Task):
+    """A task configuration for generating JSON conforming to a schema."""
 
-#     def __init__(self, json_data_path: str, max_tokens: int = 450):
-#         super().__init__(
-#             name="json",
-#             dataset=json.JSONDataset.from_csv(json_data_path),
-#             evaluator=json.JSONEvaluator(),
-#             max_tokens=max_tokens,
-#         )
+    def __init__(
+        self,
+        max_tokens: int = 450,
+        tasks: Optional[list[str]] = None,
+        split: str = "val",
+    ):
+        tasks = tasks or ["Github_trivial", "Github_easy", "Github_medium"]
+        super().__init__(
+            dataset=json_schema.JSONSchemaBenchDataset.from_tasks(tasks, split),
+            evaluator=json_schema.JSONSchemaBenchEvaluator(),
+            max_tokens=max_tokens,
+        )
 
-#     def make_potential(self, instance: Instance) -> Potential:
-#         return JsonSchema(instance.schema)
+    def make_condition(self, instance: Instance) -> Potential:
+        return JsonSchema(instance.json_schema)
 
-#     def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
-#         return [llm.tokenizer.eos_token_id]
+    def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
+        return [llm.byte_vocab[llm.tokenizer.eos_token_id]]
 
-#     def get_prompt(self, tokenizer: AutoTokenizer, instance: Instance) -> list[int]:
-#         return json.default_prompt_formatter(tokenizer, instance)
+    def get_prompt(
+        self, tokenizer: AutoTokenizer, instance: Instance, use_chat_format: bool = True
+    ) -> list[int]:
+        return json_schema.default_prompt_formatter(
+            tokenizer, instance, use_chat_format
+        )
