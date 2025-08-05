@@ -10,7 +10,7 @@ Tidied scripts to replicate the paper experiments based on the [genlm/genlm-cont
 
 ## Setup
 
-## Install project
+### Install project
 
 1. Clone this repository:
 
@@ -62,7 +62,7 @@ cd ../..
 
 ## Running experiments
 
-See the `scripts` directory for scritps which run the experiments from the paper.
+See the `scripts` directory for scripts which run the experiments from the paper.
 
 ## Repository structure
 
