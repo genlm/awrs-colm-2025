@@ -31,13 +31,13 @@ Run tasks (default output dirs shown; you may pass a custom results dir as the f
 ./pattern_matching.sh [results/pattern_matching]
 ```
 
-- Text-to-SQL (2 replicates, chat format):
+- Text-to-SQL:
 
 ```bash
 ./text_to_sql.sh [results/text_to_sql]
 ```
 
-- JSON (2 replicates, chat format). Note: this script requires a results dir argument:
+- JSON:
 
 ```bash
 ./json.sh [results/json]
@@ -47,9 +47,9 @@ Each task script runs the following methods (with the shown default hyperparamet
 
 - `base-lm`
 - `lcd`
-- `sample-rerank` (e.g., `--num-particles 10`)
-- `twisted-smc` (e.g., `--num-particles 10 --ess-threshold 0.90`)
-- `awrs-smc` (e.g., `--num-particles 5 --ess-threshold 0.5`)
+- `sample-rerank` (with `--num-particles 10`)
+- `twisted-smc` (with `--num-particles 10 --ess-threshold 0.90`)
+- `awrs-smc` (with `--num-particles 5 --ess-threshold 0.5`)
 
 Edit the scripts directly to change `MODEL_NAME`, `N_REPLICATES`, particle counts, and ESS thresholds.
 
