@@ -14,8 +14,6 @@ from .tasks import Task
 
 
 class Method(ABC):
-    """A method for constrained sampling from a language model."""
-
     def __init__(
         self,
         llm: AsyncVirtualLM,
