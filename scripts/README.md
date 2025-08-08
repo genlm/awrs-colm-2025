@@ -8,6 +8,7 @@ This directory contains helper scripts to run experiments and to aggregate the r
 - `json.sh`: Runs the JSON task.
 - `summarize_results.py`: Aggregates results into a CSV and generates LaTeX tables with bootstrap confidence intervals.
 
+*Script for goal inference domain will be available shortly.*
 
 ### Usage
 
