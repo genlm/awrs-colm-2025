@@ -20,7 +20,8 @@ dependencies = [
     "pytest-asyncio",
     "plotnine",
     "json_stream",
-    "jsonschema"
+    "jsonschema",
+    "datasets"
 ]
 
 [tool.setuptools.packages.find]
