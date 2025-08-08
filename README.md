@@ -6,7 +6,7 @@ This repository contains content related to the paper *Fast Controlled Generatio
 
 The most performant reference implementation of the AWRS-SMC algorithm can be found in the actively maintained [genlm/genlm-control](https://github.com/genlm/genlm-control) library.
 
-Tidied scripts to replicate the paper experiments based on the [genlm/genlm-control](https://github.com/genlm/genlm-control) and [genlm/genlm-eval](https://github.com/genlm/genlm-eval) libraries will be available shortly.
+This repo contains scripts to replicate the paper experiments based on the [genlm/genlm-control](https://github.com/genlm/genlm-control) and [genlm/genlm-eval](https://github.com/genlm/genlm-eval) libraries.
 
 ## Setup
 
