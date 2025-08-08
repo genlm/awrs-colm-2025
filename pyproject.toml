@@ -12,7 +12,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = []
 dependencies = [
-    "genlm-eval[spider,molecules,pattern_matching,json_schema_bench] @ git+https://github.com/genlm/genlm-eval.git@benlebrun/json-schema-bench",
+    "genlm-eval[spider,molecules,pattern_matching,json_schema_bench] @ git+https://github.com/genlm/genlm-eval.git",
     "genlm-control==0.2.11",
     "llamppl @ git+https://github.com/genlm/llamppl.git@improve-resampling",
     "click",
