@@ -71,7 +71,7 @@ awrs-colm-2025/
 ├── experiments/              # Core experimental code
 │   ├── __main__.py           # Main CLI entry point for running experiments
 │   ├── tasks.py              # Task definitions and registry for different domains
-│   ├── methods.py            # Implementation of sampling methods (AWRS, baselines)
+│   ├── methods.py            # Implementation of sampling methods (AWRS SMC, baselines)
 │   └── sampler.py            # Implementation of the core AWRS algorithm for constrained-generation
 ├── scripts/                  # Experiment execution scripts
 │   ├── text_to_sql.sh        # Script to run Text-to-SQL experiments
