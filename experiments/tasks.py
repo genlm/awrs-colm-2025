@@ -3,7 +3,7 @@ from typing import Optional
 from abc import ABC, abstractmethod
 from transformers import AutoTokenizer
 from functools import lru_cache
-from genlm.control import Potential, BoolCFG, JsonSchema
+from genlm.control import Potential, BoolCFG
 from genlm.backend.llm import AsyncVirtualLM
 from genlm.eval import Dataset, Evaluator, Instance
 
@@ -13,6 +13,8 @@ from genlm.eval.domains import (
     spider,
     json_schema,
 )
+
+from . import json_utils
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -157,6 +159,7 @@ class MolecularSynthesis(Task):
         self,
         smiles_path: Optional[str] = None,
         max_tokens: int = 100,
+        n_instances: int = 100,
     ):
         smiles_path = (
             smiles_path or DATA_DIR / "molecular_synthesis" / "GDB17.50000000.smi"
@@ -164,7 +167,7 @@ class MolecularSynthesis(Task):
 
         super().__init__(
             dataset=molecular_synthesis.MolecularSynthesisDataset.from_smiles(
-                smiles_path
+                smiles_path, n_instances=n_instances
             ),
             evaluator=molecular_synthesis.MolecularSynthesisEvaluator(),
             max_tokens=max_tokens,
@@ -205,7 +208,7 @@ class JSON(Task):
         )
 
     def make_condition(self, instance: Instance) -> Potential:
-        return JsonSchema(instance.json_schema)
+        return json_utils.JsonSchema(instance.json_schema)
 
     def get_eos_tokens(self, llm: AsyncVirtualLM) -> list[bytes]:
         return [llm.byte_vocab[llm.tokenizer.eos_token_id]]
@@ -213,6 +216,4 @@ class JSON(Task):
     def get_prompt(
         self, tokenizer: AutoTokenizer, instance: Instance, use_chat_format: bool = True
     ) -> list[int]:
-        return json_schema.default_prompt_formatter(
-            tokenizer, instance, use_chat_format
-        )
+        return json_utils.prompt_formatter(tokenizer, instance, use_chat_format)

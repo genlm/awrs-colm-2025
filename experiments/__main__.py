@@ -15,13 +15,30 @@ console = console.Console()
 TASKS = list(TASK_REGISTRY.keys())
 
 
+def set_seed(seed):
+    import random
+    import numpy as np
+    import torch
+    import transformers
+    import os
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    transformers.set_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
+
 def load_llm(model_name, max_model_len):
     backend = "vllm" if torch.cuda.is_available() else "hf"
     if backend == "vllm":
+        llm_opts = {"engine_opts": {"max_model_len": max_model_len}}
         return load_model_by_name(
             model_name,
             backend,
-            llm_opts={"engine_opts": {"max_model_len": max_model_len}},
+            llm_opts=llm_opts,
         )
     else:
         return load_model_by_name(model_name, backend)
@@ -77,6 +94,16 @@ def common_options(f):
         default=10000,
         help="Maximum model length supplied at initialization.",
     )(f)
+    f = click.option(
+        "--seed",
+        default=80808,
+        help="Seed for randomness.",
+    )(f)
+    f = click.option(
+        "--n-replicates",
+        default=1,
+        help="Number of replicates to run.",
+    )(f)
 
     return f
 
@@ -93,6 +120,8 @@ def base_lm(
     max_n_instances,
     max_model_len,
     use_chat_format,
+    seed,
+    n_replicates,
 ):
     """Run the base language model on a task."""
     console.print(f"[blue]Running base LM on '{task}'[/blue]")
@@ -103,12 +132,14 @@ def base_lm(
         result_dir = os.path.join(result_dir, "base-lm")
         os.makedirs(result_dir, exist_ok=True)
 
+    set_seed(seed)
+
     asyncio.run(
         run_evaluation(
             dataset=task.dataset,
             model=model,
             evaluator=task.evaluator,
-            n_replicates=1,
+            n_replicates=n_replicates,
             verbosity=verbosity,
             output_dir=result_dir,
             overwrite_results=overwrite_results,
@@ -130,6 +161,8 @@ def lcd(
     max_n_instances,
     max_model_len,
     use_chat_format,
+    seed,
+    n_replicates,
 ):
     """Run locally constrained decoding on a task."""
     console.print(f"[blue]Running LCD on '{task}'[/blue]")
@@ -139,12 +172,14 @@ def lcd(
         result_dir = os.path.join(result_dir, "lcd")
         os.makedirs(result_dir, exist_ok=True)
 
+    set_seed(seed)
+
     asyncio.run(
         run_evaluation(
             dataset=task.dataset,
-            model=LCD(load_llm(model_name, max_model_len), task, use_chat_format),
+            model=LCD(load_llm(model_name, max_model_len), task, use_chat_format, seed),
             evaluator=task.evaluator,
-            n_replicates=1,
+            n_replicates=n_replicates,
             verbosity=verbosity,
             output_dir=result_dir,
             overwrite_results=overwrite_results,
@@ -170,6 +205,8 @@ def sample_rerank(
     num_particles,
     use_chat_format,
     max_model_len,
+    seed,
+    n_replicates,
 ):
     """Run sample rerank on a task."""
     console.print(
@@ -185,12 +222,14 @@ def sample_rerank(
         )
         os.makedirs(result_dir, exist_ok=True)
 
+    set_seed(seed)
+
     asyncio.run(
         run_evaluation(
             dataset=task.dataset,
             model=model,
             evaluator=task.evaluator,
-            n_replicates=1,
+            n_replicates=n_replicates,
             verbosity=verbosity,
             output_dir=result_dir,
             overwrite_results=overwrite_results,
@@ -218,6 +257,8 @@ def twisted_smc(
     ess_threshold,
     use_chat_format,
     max_model_len,
+    seed,
+    n_replicates,
 ):
     """Run twisted SMC on a task."""
     console.print(
@@ -232,6 +273,8 @@ def twisted_smc(
         use_chat_format,
     )
 
+    set_seed(seed)
+
     if result_dir is not None:
         result_dir = os.path.join(
             result_dir, "twisted_smc", f"{num_particles}_particles"
@@ -243,7 +286,7 @@ def twisted_smc(
             dataset=task.dataset,
             model=model,
             evaluator=task.evaluator,
-            n_replicates=1,
+            n_replicates=n_replicates,
             verbosity=verbosity,
             output_dir=result_dir,
             overwrite_results=overwrite_results,
@@ -271,6 +314,8 @@ def awrs_smc(
     num_particles,
     ess_threshold,
     max_model_len,
+    seed,
+    n_replicates,
 ):
     """Run AWRS SMC on a task."""
     console.print(
@@ -283,7 +328,10 @@ def awrs_smc(
         num_particles,
         ess_threshold,
         use_chat_format,
+        seed,
     )
+
+    set_seed(seed)
 
     if result_dir is not None:
         result_dir = os.path.join(result_dir, "awrs_smc", f"{num_particles}_particles")
@@ -294,7 +342,7 @@ def awrs_smc(
             dataset=task.dataset,
             model=model,
             evaluator=task.evaluator,
-            n_replicates=1,
+            n_replicates=n_replicates,
             verbosity=verbosity,
             output_dir=result_dir,
             overwrite_results=overwrite_results,

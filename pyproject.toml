@@ -14,9 +14,13 @@ authors = []
 dependencies = [
     "genlm-eval[spider,molecules,pattern_matching,json_schema_bench] @ git+https://github.com/genlm/genlm-eval.git@benlebrun/json-schema-bench",
     "genlm-control==0.2.11",
+    "llamppl @ git+https://github.com/genlm/llamppl.git@improve-resampling",
     "click",
     "pytest",
-    "pytest-asyncio"
+    "pytest-asyncio",
+    "plotnine",
+    "json_stream",
+    "jsonschema"
 ]
 
 [tool.setuptools.packages.find]

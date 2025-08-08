@@ -16,10 +16,17 @@ from .tasks import Task
 class Method(ABC):
     """A method for constrained sampling from a language model."""
 
-    def __init__(self, llm: AsyncVirtualLM, task: Task, use_chat_format: bool = True):
+    def __init__(
+        self,
+        llm: AsyncVirtualLM,
+        task: Task,
+        use_chat_format: bool = True,
+        seed: int = None,
+    ):
         self.llm = llm
         self.task = task
         self.use_chat_format = use_chat_format
+        self.seed = seed
 
     @property
     def tokenizer(self):
@@ -60,17 +67,24 @@ class Method(ABC):
         return llm_potential, condition
 
     @abstractmethod
-    async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
+    async def __call__(
+        self, instance: Instance, output_dir: str, replicate: int
+    ) -> ModelOutput:
         pass
 
 
 class BaseLM(Method):
     """Sample directly from the language model."""
 
-    async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
+    async def __call__(
+        self, instance: Instance, output_dir: str, replicate: int
+    ) -> ModelOutput:
         llm = self.make_llm_potential(instance)
+
+        sampler = direct_token_sampler(llm)
+
         start = time.time()
-        outputs = await direct_token_sampler(llm).smc(
+        outputs = await sampler.smc(
             n_particles=1,
             ess_threshold=0,
             max_tokens=self.max_tokens,
@@ -83,11 +97,17 @@ class BaseLM(Method):
 class LCD(Method):
     """Sample using locally constrained decoding."""
 
-    async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
+    async def __call__(
+        self, instance: Instance, output_dir: str, replicate: int
+    ) -> ModelOutput:
         llm_potential, condition = self.make_potentials(instance)
 
+        sampler = AWRS(
+            llm_potential, condition, proper_weights=False, seed=self.seed + replicate
+        )
+
         start = time.time()
-        outputs = await AWRS(llm_potential, condition, proper_weights=False).smc(
+        outputs = await sampler.smc(
             n_particles=1,
             ess_threshold=0,
             max_tokens=self.max_tokens,
@@ -106,15 +126,20 @@ class SampleRerank(Method):
         task: Task,
         n_particles: int,
         use_chat_format: bool = True,
+        seed: int = None,
     ):
-        super().__init__(llm, task, use_chat_format)
+        super().__init__(llm, task, use_chat_format, seed)
         self.n_particles = n_particles
 
-    async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
+    async def __call__(
+        self, instance: Instance, output_dir: str, replicate: int
+    ) -> ModelOutput:
         llm_potential, condition = self.make_potentials(instance)
 
+        sampler = direct_token_sampler(llm_potential)
+
         start = time.time()
-        outputs = await direct_token_sampler(llm_potential).smc(
+        outputs = await sampler.smc(
             n_particles=self.n_particles,
             ess_threshold=0,
             max_tokens=self.max_tokens,
@@ -135,16 +160,21 @@ class TwistedSMC(Method):
         n_particles: int,
         ess_threshold: float,
         use_chat_format: bool = True,
+        seed: int = None,
     ):
-        super().__init__(llm, task, use_chat_format)
+        super().__init__(llm, task, use_chat_format, seed)
         self.n_particles = n_particles
         self.ess_threshold = ess_threshold
 
-    async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
+    async def __call__(
+        self, instance: Instance, output_dir: str, replicate: int
+    ) -> ModelOutput:
         llm_potential, condition = self.make_potentials(instance)
 
+        sampler = direct_token_sampler(llm_potential)
+
         start = time.time()
-        outputs = await direct_token_sampler(llm_potential).smc(
+        outputs = await sampler.smc(
             n_particles=self.n_particles,
             ess_threshold=self.ess_threshold,
             max_tokens=self.max_tokens,
@@ -165,16 +195,23 @@ class AWRSSMC(Method):
         n_particles: int,
         ess_threshold: float,
         use_chat_format: bool = True,
+        seed: int = None,
     ):
-        super().__init__(llm, task, use_chat_format)
+        super().__init__(llm, task, use_chat_format, seed)
         self.n_particles = n_particles
         self.ess_threshold = ess_threshold
 
-    async def __call__(self, instance: Instance, *args, **kwargs) -> ModelOutput:
+    async def __call__(
+        self, instance: Instance, output_dir: str, replicate: int
+    ) -> ModelOutput:
         llm_potential, condition = self.make_potentials(instance)
 
+        sampler = AWRS(
+            llm_potential, condition, proper_weights=True, seed=self.seed + replicate
+        )
+
         start = time.time()
-        outputs = await AWRS(llm_potential, condition, proper_weights=True).smc(
+        outputs = await sampler.smc(
             n_particles=self.n_particles,
             ess_threshold=self.ess_threshold,
             max_tokens=self.max_tokens,
