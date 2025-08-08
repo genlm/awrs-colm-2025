@@ -100,9 +100,9 @@ class LCD(Method):
     ) -> ModelOutput:
         llm_potential, condition = self.make_potentials(instance)
 
-        sampler = AWRS(
-            llm_potential, condition, proper_weights=False, seed=self.seed + replicate
-        )
+        seed = self.seed + replicate if self.seed is not None else None
+
+        sampler = AWRS(llm_potential, condition, proper_weights=False, seed=seed)
 
         start = time.time()
         outputs = await sampler.smc(
@@ -204,9 +204,9 @@ class AWRSSMC(Method):
     ) -> ModelOutput:
         llm_potential, condition = self.make_potentials(instance)
 
-        sampler = AWRS(
-            llm_potential, condition, proper_weights=True, seed=self.seed + replicate
-        )
+        seed = self.seed + replicate if self.seed is not None else None
+
+        sampler = AWRS(llm_potential, condition, proper_weights=True, seed=seed)
 
         start = time.time()
         outputs = await sampler.smc(
